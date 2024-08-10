@@ -1,0 +1,6 @@
+---
+- name: Deploy k8s master
+  hosts: k8s_master
+  roles:
+    - common
+    - k8s_master

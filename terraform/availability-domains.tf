@@ -1,0 +1,4 @@
+# アベイラビリティ・ドメイン設定
+data "oci_identity_availability_domains" "ads" {
+  compartment_id = var.compartment_id
+}

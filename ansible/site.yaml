@@ -1,0 +1,6 @@
+---
+- name: Import k8s_master.yaml
+  import_playbook: k8s_master.yaml
+
+- name: Import k8s_worker.yaml
+  import_playbook: k8s_workers.yaml

@@ -1,0 +1,33 @@
+---
+# --- Setup firewall - iptables. ---
+
+- name: Disable ufw.
+  become: true
+  ansible.builtin.systemd_service:
+    name: ufw.service
+    state: stopped
+    enabled: false
+
+- name: Deploy iptables file.
+  become: true
+  ansible.builtin.copy:
+    src: rules.v4
+    dest: /etc/iptables/rules.v4
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply iptables setting
+  become: true
+  community.general.iptables_state:
+    state: restored
+    path: /etc/iptables/rules.v4
+
+# --- Join k8s cluster. ---
+
+- name: Join k8s cluster.
+  become: true
+  ansible.builtin.shell: |
+    kubeadm join {{ hostvars['k8s_master'].private_ip_address }}:6443 --token {{ hostvars['k8s_master'].kube_token.stdout }} --discovery-token-ca-cert-hash sha256:{{ hostvars['k8s_master'].token_ca_cert.stdout }}
+  register: result_kubeadm_join
+  changed_when: result_kubeadm_join.rc != 0

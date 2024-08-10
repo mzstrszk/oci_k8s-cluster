@@ -1,0 +1,180 @@
+---
+- name: Update apt packages
+  become: true
+  ansible.builtin.apt:
+    name: "*"
+    state: present
+    update_cache: true
+
+# --- Setup OS environment. ---
+
+- name: Disable swap 1
+  become: true
+  ansible.builtin.command: swapoff -a
+  register: result_swapoff
+  changed_when: result_swapoff.rc != 0
+
+- name: Disable swap 2
+  become: true
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(.* swap .+)$'
+    replace: '#\1'
+
+- name: Set load kernel modules
+  become: true
+  ansible.builtin.copy:
+    content: |
+      overlay
+      br_netfilter
+    dest: /etc/modules-load.d/99-kubernetes-cri.conf
+    mode: "0644"
+
+- name: Load kernel modules
+  become: true
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - overlay
+    - br_netfilter
+
+- name: Apply network settings
+  become: true
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: false
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
+  loop:
+    - key: net.bridge.bridge-nf-call-iptables
+      value: 1
+    - key: net.bridge.bridge-nf-call-ip6tables
+      value: 1
+    - key: net.ipv4.ip_forward
+      value: 1
+
+# --- Install containerd. ---
+
+- name: Add official Docker GPG key
+  become: true
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+- name: Get machine architecture
+  become: true
+  ansible.builtin.command: dpkg --print-architecture
+  register: arch_result
+  changed_when: false
+
+- name: Get distribution release
+  become: true
+  ansible.builtin.shell: . /etc/os-release && echo "$VERSION_CODENAME"
+  register: dist_result
+  changed_when: false
+
+- name: Add apt repository
+  become: true
+  vars:
+    arch: "{{ arch_result.stdout }}"
+    dist: "{{ dist_result.stdout }}"
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ arch }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ dist }} stable"
+    filename: docker
+
+- name: Update apt packages
+  become: true
+  ansible.builtin.apt:
+    name: "*"
+    state: present
+    update_cache: true
+
+- name: Install dependent packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - containerd.io
+    state: present
+
+- name: Create containerd configure directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0775"
+
+- name: Create config.toml
+  become: true
+  # ansible.builtin.shell: containerd config default | sed -e 's/SystemdCgroup = .*/SystemdCgroup = true/' > /etc/containerd/config.toml
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      containerd config default | tee /etc/containerd/config.toml
+    executable: /bin/bash
+  changed_when: true
+  notify:
+    - "restart containerd"
+
+- name: Flush handler
+  ansible.builtin.meta: flush_handlers
+
+# --- Install kubeadm, kubelet, kubectl. ---
+
+- name: Add kubernetes's GPG key
+  become: true
+  ansible.builtin.apt_key:
+    url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
+    keyring: /usr/share/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Add apt k8s repository
+  become: true
+  ansible.builtin.apt_repository:
+    repo: deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+    filename: kubernetes
+
+- name: Update apt packages
+  become: true
+  ansible.builtin.apt:
+    name: "*"
+    state: present
+    update_cache: true
+
+- name: Install kubeadm, kubelet, kubectl package
+  become: true
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+
+- name: Prevent kubeadm from being upgraded
+  become: true
+  ansible.builtin.dpkg_selections:
+    name: kubeadm
+    selection: hold
+
+- name: Prevent kubelet from being upgraded
+  become: true
+  ansible.builtin.dpkg_selections:
+    name: kubelet
+    selection: hold
+
+- name: Prevent kubectl from being upgraded
+  become: true
+  ansible.builtin.dpkg_selections:
+    name: kubectl
+    selection: hold
+  changed_when: true
+  notify:
+    - "restart kubelet"
+
+- name: Flush handler
+  ansible.builtin.meta: flush_handlers

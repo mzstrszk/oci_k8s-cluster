@@ -1,0 +1,13 @@
+# common
+.DS_Store
+.vscode*
+
+# terraform
+.terraform
+.terraform.lock.hcl
+*.tfstate*
+*.tfvars
+
+# ansible
+inventory.ini
+inventory.ini.j2

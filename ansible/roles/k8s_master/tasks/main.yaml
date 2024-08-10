@@ -1,0 +1,79 @@
+---
+# --- Setup firewall - iptables. ---
+
+- name: Disable ufw
+  become: true
+  ansible.builtin.systemd_service:
+    name: ufw.service
+    state: stopped
+    enabled: false
+
+- name: Deploy iptables file
+  become: true
+  ansible.builtin.copy:
+    src: rules.v4
+    dest: /etc/iptables/rules.v4
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply iptables setting
+  become: true
+  community.general.iptables_state:
+    state: restored
+    path: /etc/iptables/rules.v4
+
+# --- Init k8s master. ---
+
+- name: Execute kubeadm init
+  become: true
+  ansible.builtin.command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+  register: result_kubeadm_init
+  changed_when: result_kubeadm_init.rc != 0
+
+- name: Set home directory path
+  ansible.builtin.command: echo "{{ ansible_env.HOME }}/.kube/"
+  register: kube_path
+  changed_when: kube_path.rc != 0
+
+- name: Create $HOME/.kube directory
+  ansible.builtin.file:
+    path: "{{ kube_path.stdout }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Copy admin.conf to $HOME/.kube/config
+  become: true
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ kube_path.stdout }}/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+    remote_src: true
+
+- name: Install netowrk plugin
+  ansible.builtin.command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+  register: result_kubectl_apply
+  changed_when: result_kubectl_apply.rc != 0
+
+# --- Create token and ca cert. ---
+
+- name: Create token to hostvars
+  become: true
+  ansible.builtin.command: kubeadm token create
+  register: kube_token
+  changed_when: kube_token.rc != 0
+
+- name: Create ca cert to hostvars
+  become: true
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
+    executable: /bin/bash
+  check_mode: false
+  register: token_ca_cert
+  changed_when: token_ca_cert.rc != 0

@@ -85,13 +85,12 @@
    kubect get nodes
    ```
 
-6. 環境を削除する。
-   削除する場合は、Terraformでdestroyを実行する。
+6. 環境を削除する場合は、Terraformでdestroyを実行します。
 
    ```
    cd ../terraform
 
-   # 以下を実行することで、環境を全て削除する。
+   # 以下を実行することで、環境を全て削除します。
    terraform destroy
    ```
 
